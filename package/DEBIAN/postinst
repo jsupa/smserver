@@ -1,0 +1,24 @@
+#!/bin/bash
+set -e
+dir="/var/jb/Applications/SMServer.app"
+[ -d "$dir" ] || mkdir -p "$dir"
+if ! [ -f "${dir}/smserver_cert_pass.txt" ]; then
+  pass=$(openssl rand -base64 24)
+  openssl req -x509 -newkey rsa:4096 \
+    -keyout "${dir}/key.pem" -out "${dir}/cert.pem" \
+    -days 9999 -nodes \
+    -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
+  openssl x509 -outform der -in "${dir}/cert.pem" -out "${dir}/cert.der"
+  openssl pkcs12 -export \
+    -out "${dir}/identity.pfx" \
+    -inkey "${dir}/key.pem" -in "${dir}/cert.pem" \
+    -password pass:"${pass}" -legacy 2>/dev/null || \
+  openssl pkcs12 -export \
+    -out "${dir}/identity.pfx" \
+    -inkey "${dir}/key.pem" -in "${dir}/cert.pem" \
+    -password pass:"${pass}"
+  rm "${dir}/key.pem" "${dir}/cert.pem"
+  echo -n "${pass}" > "${dir}/smserver_cert_pass.txt"
+fi
+[ -d /var/jb/var/tmp/com.ianwelker.smserver ] || mkdir -p /var/jb/var/tmp/com.ianwelker.smserver
+/var/jb/usr/bin/uicache -p "/var/jb/Applications/SMServer.app" || true
