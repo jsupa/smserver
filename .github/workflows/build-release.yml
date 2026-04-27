@@ -57,11 +57,12 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
             -o $THEOS/include/MRYIPCCenter.h
-          mkdir -p $THEOS/lib/iphone/rootless
+          mkdir -p $THEOS/lib/iphone/rootless $THEOS/lib/iphone/roothide
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
             -o $THEOS/lib/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
+          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/roothide/libmryipc.dylib
 
       - name: Build tweak
         run: |
@@ -74,7 +75,7 @@ jobs:
             THEOS_MAKE_PATH=/home/runner/theos/makefiles \
             ARCHS="arm64 arm64e" \
             TARGET="iphone:clang:16.5" \
-            THEOS_PACKAGE_SCHEME=rootless \
+            THEOS_PACKAGE_SCHEME=roothide \
             FINALPACKAGE=1
 
       - name: Extract dylib from staging
