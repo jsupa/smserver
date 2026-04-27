@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-tweak:
-    name: Build libsmserver tweak
+    name: Build libsmserver tweak deb
     runs-on: ubuntu-latest
 
     env:
@@ -63,11 +63,13 @@ jobs:
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
 
-      - name: Build tweak
+      - name: Build tweak deb
         run: |
           export THEOS=/home/runner/theos
           export THEOS_MAKE_PATH=/home/runner/theos/makefiles
           export PATH="/home/runner/theos/bin:$PATH"
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -z "$VERSION" ] && VERSION=$(grep '^Version:' libsmserver/control | awk '{print $2}')
           cd libsmserver
           make package \
             THEOS=/home/runner/theos \
@@ -75,43 +77,30 @@ jobs:
             ARCHS="arm64 arm64e" \
             TARGET="iphone:clang:16.5" \
             THEOS_PACKAGE_SCHEME=rootless \
-            FINALPACKAGE=1
+            FINALPACKAGE=1 \
+            PACKAGE_VERSION="$VERSION"
 
-      - name: Extract and fix dylib
+      - name: Find built deb
+        id: find_deb
         run: |
-          DYLIB=$(find libsmserver -name "libsmserver.dylib" | grep -v "^libsmserver/lib/" | head -1)
-          [ -z "$DYLIB" ] && DYLIB=$(find libsmserver -name "libsmserver.dylib" | head -1)
-          echo "Found dylib: $DYLIB"
-          cp "$DYLIB" libsmserver_built.dylib
+          DEB=$(find libsmserver/packages -name "*.deb" | sort | tail -1)
+          echo "deb_path=$DEB" >> $GITHUB_OUTPUT
+          echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
+          echo "Found: $DEB"
 
-          # Strip the rpath that RootHide patcher tries to add — prevents duplicate rpath error
-          for ARCH in arm64 arm64e; do
-            install_name_tool -delete_rpath @loader_path/.jbroot/usr/lib \
-              libsmserver_built.dylib 2>/dev/null || true
-          done
-          echo "RPATHs after fix:"
-          otool -l libsmserver_built.dylib | grep -A2 LC_RPATH || true
-
-      - name: Upload tweak dylib
+      - name: Upload tweak deb
         uses: actions/upload-artifact@v4
         with:
-          name: libsmserver-dylib
-          path: libsmserver_built.dylib
+          name: ${{ steps.find_deb.outputs.deb_name }}
+          path: ${{ steps.find_deb.outputs.deb_path }}
 
   build-app:
     name: Build SMServer app deb
     runs-on: macos-14
-    needs: build-tweak
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Download tweak dylib
-        uses: actions/download-artifact@v4
-        with:
-          name: libsmserver-dylib
-          path: tweak-artifact
 
       - name: Select Xcode
         run: |
@@ -179,38 +168,27 @@ jobs:
           ldid -Ssrc/app.entitlements \
             package/SMServer.xcarchive/Products/Applications/SMServer.app/SMServer
 
-      - name: Build combined rootless deb
+      - name: Build app deb
         run: |
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
           DEB=package/app_deb
-          # Strip leading 'v' from tag (v0.9.1 -> 0.9.1), fallback to control file version
           VERSION="${GITHUB_REF_NAME#v}"
           [ -z "$VERSION" ] && VERSION=$(grep '^Version:' package/DEBIAN/control | awk '{print $2}')
 
-          # Update version in control file to match tag
           sed -i '' "s/^Version:.*/Version: ${VERSION}/" package/DEBIAN/control
 
-          # App into rootless Applications
           mkdir -p "${DEB}/var/jb/Applications"
           cp -r "$APP" "${DEB}/var/jb/Applications/SMServer.app"
-
-          # Bundle libsmserver tweak into rootless substrate path
-          mkdir -p "${DEB}/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          cp tweak-artifact/libsmserver_built.dylib \
-            "${DEB}/var/jb/Library/MobileSubstrate/DynamicLibraries/libsmserver.dylib"
-          cp libsmserver/libsmserver.plist \
-            "${DEB}/var/jb/Library/MobileSubstrate/DynamicLibraries/libsmserver.plist"
 
           cp -r package/DEBIAN "${DEB}/DEBIAN"
           chmod 755 "${DEB}/DEBIAN/postinst" "${DEB}/DEBIAN/postrm"
 
           DEB_NAME="SMServer_${VERSION}_iphoneos-arm64.deb"
           dpkg-deb --build "${DEB}" "package/${DEB_NAME}"
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "DEB_NAME=${DEB_NAME}" >> $GITHUB_ENV
           echo "Built: $(ls -lh package/${DEB_NAME})"
 
-      - name: Upload combined deb artifact
+      - name: Upload app deb
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.DEB_NAME }}
@@ -219,7 +197,7 @@ jobs:
   release:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-app]
+    needs: [build-tweak, build-app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -228,7 +206,6 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: SMServer_*_iphoneos-arm64.deb
           path: artifacts
           merge-multiple: true
 
@@ -239,12 +216,11 @@ jobs:
           body: |
             ## SMServer – rootless iOS 16 + RootHide
 
-            Single package — includes both the app and the libsmserver tweak.
-
-            ### Installation
-            1. Install `SMServer` `.deb`
-            2. Open the Messages app once (so the tweak injects into MobileSMS)
-            3. Open SMServer and connect via browser
+            ### Installation order (important!)
+            1. Install `libsmserver` `.deb` first
+            2. Install `SMServer` `.deb`
+            3. Respring
+            4. Open the Messages app once before using SMServer in the browser
           files: artifacts/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
