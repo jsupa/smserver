@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  THEOS: /opt/theos
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,34 +17,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get install -y build-essential fakeroot rsync curl perl zip git \
+            libxml2 libtinfo6 libplist-utils
+
       - name: Cache Theos
         uses: actions/cache@v4
         id: theos-cache
         with:
-          path: ${{ github.workspace }}/theos
-          key: theos-${{ runner.os }}-v2
+          path: /opt/theos
+          key: theos-ubuntu-v3
 
-      - name: Install Theos
-        uses: Randomblock1/theos-action@v1
+      - name: Clone Theos
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --recursive https://github.com/theos/theos.git /opt/theos
+
+      - name: Download Linux toolchain
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/theos/toolchain
+          wget -q https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.3.0/swift-5.8-ubuntu22.04.tar.xz \
+            -O /tmp/toolchain.tar.xz
+          tar -xf /tmp/toolchain.tar.xz -C /opt/theos/toolchain
+
+      - name: Download iOS 16.5 SDK
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          cd /opt/theos/sdks
+          wget -q https://github.com/theos/sdks/archive/master.zip -O master.zip
+          unzip -q master.zip
+          mv sdks-master/*.sdk /opt/theos/sdks/
+          rm -rf sdks-master master.zip
 
       - name: Install libMRYIPC header
         run: |
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
-            -o $THEOS/include/MRYIPCCenter.h
-          # Stub pre linker – len prázdna dylib, reálna je na telefóne
-          touch /tmp/mryipc_stub.c
-          $THEOS/toolchain/linux/iphone/bin/clang \
+            -o /opt/theos/include/MRYIPCCenter.h
+          # Prázdna stub dylib pre linker
+          echo "" | /opt/theos/toolchain/linux/iphone/bin/clang \
             -arch arm64 -arch arm64e \
-            -shared -o $THEOS/lib/libmryipc.dylib /tmp/mryipc_stub.c \
-            -isysroot $THEOS/sdks/iPhoneOS16.5.sdk \
-            || true
-          # Fallback: skopíruj existujúcu stub ak clang zlyhal
-          if [ ! -s "$THEOS/lib/libmryipc.dylib" ]; then
-            printf '\xcf\xfa\xed\xfe' > $THEOS/lib/libmryipc.dylib
-          fi
+            -x c - -shared \
+            -isysroot /opt/theos/sdks/iPhoneOS16.5.sdk \
+            -o /opt/theos/lib/libmryipc.dylib 2>/dev/null || \
+          dd if=/dev/zero bs=1 count=4 2>/dev/null > /opt/theos/lib/libmryipc.dylib
+
+      - name: Verify Theos make rules exist
+        run: |
+          echo "THEOS=$THEOS"
+          ls $THEOS/makefiles/
+          ls $THEOS/sdks/
 
       - name: Build deb
         run: |
+          export PATH="$THEOS/bin:$PATH"
           cd libsmserver
           make package \
             ARCHS="arm64 arm64e" \
@@ -57,13 +87,13 @@ jobs:
           echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
           echo "Found: $DEB"
 
-      - name: Upload artifact (pre workflow_dispatch)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.find_deb.outputs.deb_name }}
           path: ${{ steps.find_deb.outputs.deb_path }}
 
-      - name: Create Release (len pre tagy)
+      - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -78,7 +108,7 @@ jobs:
 
             ### Inštalácia
             1. Stiahni `.deb` nižšie
-            2. Presuň na telefón (AirDrop / SCP / iMazing)
+            2. Presuň na telefón (AirDrop / iMazing / SCP)
             3. Otvor v **Sileo** → nainštaluj
             4. Respring
           files: ${{ steps.find_deb.outputs.deb_path }}
