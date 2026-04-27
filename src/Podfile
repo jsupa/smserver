@@ -30,9 +30,15 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
+      # Bump deployment target to avoid libarclite missing in Xcode 14.3+
       current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
-      next if current.nil?
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0' if current.to_f < 16.0
+      unless current.nil?
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0' if current.to_f < 16.0
+      end
+      # Force arm64 only — bundled openssl.framework in Criollo has no arm64e slice
+      config.build_settings['ARCHS'] = 'arm64'
+      config.build_settings['VALID_ARCHS'] = 'arm64'
+      config.build_settings['EXCLUDED_ARCHS'] = 'arm64e'
     end
   end
 end

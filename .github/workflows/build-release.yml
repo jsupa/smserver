@@ -62,22 +62,21 @@ jobs:
       - name: Build & archive (no code signing)
         run: |
           cd src
-          # arm64 only: the bundled openssl.framework in Criollo has no arm64e slice
-          # iPhone 8 (A11) is arm64; arm64e is A12+ and not needed here
+          # arm64 only — Criollo's bundled openssl.framework has no arm64e slice
+          # iPhone 8 (A11) is arm64; arm64e starts at A12 (iPhone XS)
           xcodebuild clean archive \
             -workspace SMServer.xcworkspace \
             -scheme SMServer \
             -archivePath ../package/SMServer.xcarchive \
             -destination "generic/platform=iOS" \
             ARCHS="arm64" \
+            EXCLUDED_ARCHS="arm64e" \
             ONLY_ACTIVE_ARCH=NO \
-            VALID_ARCHS="arm64" \
             IPHONEOS_DEPLOYMENT_TARGET=16.0 \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            OTHER_CODE_SIGN_FLAGS="--deep"
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
           test -d ../package/SMServer.xcarchive || (echo "Archive not created!" && exit 1)
 
       - name: Sign with ldid
