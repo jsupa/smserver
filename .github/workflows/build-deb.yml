@@ -14,51 +14,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Theos
+      - name: Cache Theos
         uses: actions/cache@v4
         id: theos-cache
         with:
-          path: /opt/theos
-          key: theos-${{ runner.os }}-v1
+          path: ${{ github.workspace }}/theos
+          key: theos-${{ runner.os }}-v2
 
-      - name: Setup Theos (if not cached)
-        if: steps.theos-cache.outputs.cache-hit != 'true'
+      - name: Install Theos
+        uses: Randomblock1/theos-action@v1
+
+      - name: Install libMRYIPC header
         run: |
-          sudo apt-get install -y fakeroot dpkg-dev
-          git clone --recursive https://github.com/theos/theos.git /opt/theos
-          git -C /opt/theos submodule update --init --recursive
-
-      - name: Download iOS 16.5 SDK
-        uses: actions/cache@v4
-        id: sdk-cache
-        with:
-          path: /opt/theos/sdks
-          key: theos-sdk-16.5-v1
-
-      - name: Fetch SDK (if not cached)
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p /opt/theos/sdks
-          # Get latest tag from theos/sdks releases API
-          TAG=$(curl -s https://api.github.com/repos/theos/sdks/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
-          echo "Using SDK tag: $TAG"
-          curl -L "https://github.com/theos/sdks/releases/download/${TAG}/iPhoneOS16.5.sdk.tar.xz" \
-            -o /tmp/sdk.tar.xz
-          tar -xJf /tmp/sdk.tar.xz -C /opt/theos/sdks
-
-      - name: Install libMRYIPC headers + stub
-        run: |
-          mkdir -p /opt/theos/include /opt/theos/lib
-          # Headers
-          curl -L https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
-            -o /opt/theos/include/MRYIPCCenter.h
-          # Stub dylib pre linker (prázdna, len pre build)
-          printf '\x00' > /opt/theos/lib/libmryipc.dylib
+          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
+            -o $THEOS/include/MRYIPCCenter.h
+          # Stub pre linker – len prázdna dylib, reálna je na telefóne
+          touch /tmp/mryipc_stub.c
+          $THEOS/toolchain/linux/iphone/bin/clang \
+            -arch arm64 -arch arm64e \
+            -shared -o $THEOS/lib/libmryipc.dylib /tmp/mryipc_stub.c \
+            -isysroot $THEOS/sdks/iPhoneOS16.5.sdk \
+            || true
+          # Fallback: skopíruj existujúcu stub ak clang zlyhal
+          if [ ! -s "$THEOS/lib/libmryipc.dylib" ]; then
+            printf '\xcf\xfa\xed\xfe' > $THEOS/lib/libmryipc.dylib
+          fi
 
       - name: Build deb
         run: |
-          export THEOS=/opt/theos
-          export PATH="$THEOS/bin:$PATH"
           cd libsmserver
           make package \
             ARCHS="arm64 arm64e" \
@@ -69,15 +52,22 @@ jobs:
       - name: Find built deb
         id: find_deb
         run: |
-          DEB=$(find libsmserver/packages -name "*.deb" | head -1)
+          DEB=$(find libsmserver/packages -name "*.deb" | sort | tail -1)
           echo "deb_path=$DEB" >> $GITHUB_OUTPUT
           echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
+          echo "Found: $DEB"
 
-      - name: Create Release and upload deb
+      - name: Upload artifact (pre workflow_dispatch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_deb.outputs.deb_name }}
+          path: ${{ steps.find_deb.outputs.deb_path }}
+
+      - name: Create Release (len pre tagy)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "libsmserver ${{ github.ref_name }} (rootless/RootHide iOS 16)"
+          name: "libsmserver ${{ github.ref_name }} – rootless iOS 16"
           body: |
             ## libsmserver – rootless build pre iOS 16 + RootHide
 
@@ -87,9 +77,10 @@ jobs:
             - arm64 + arm64e fat binary
 
             ### Inštalácia
-            1. Presuň `.deb` na telefón (AirDrop / SCP)
-            2. Otvor v **Sileo** a nainštaluj
-            3. Respring / reboot
+            1. Stiahni `.deb` nižšie
+            2. Presuň na telefón (AirDrop / SCP / iMazing)
+            3. Otvor v **Sileo** → nainštaluj
+            4. Respring
           files: ${{ steps.find_deb.outputs.deb_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
