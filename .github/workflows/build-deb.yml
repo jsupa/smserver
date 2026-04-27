@@ -57,8 +57,12 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
             -o $THEOS/include/MRYIPCCenter.h
+          # Theos hľadá knižnice v lib/, lib/iphone/, lib/iphone/rootless/ – dáme do všetkých
+          mkdir -p $THEOS/lib/iphone/rootless
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
             -o $THEOS/lib/libmryipc.dylib
+          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
+          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
 
       - name: Build deb
         run: |
