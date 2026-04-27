@@ -68,9 +68,16 @@ jobs:
 
       - name: Build deb
         run: |
-          export PATH="$THEOS/bin:$PATH"
+          export THEOS=/home/runner/theos
+          export THEOS_MAKE_PATH=/home/runner/theos/makefiles
+          export PATH="/home/runner/theos/bin:$PATH"
           cd libsmserver
+          echo "THEOS=$THEOS"
+          echo "THEOS_MAKE_PATH=$THEOS_MAKE_PATH"
+          ls $THEOS/makefiles/common.mk
           make package \
+            THEOS=/home/runner/theos \
+            THEOS_MAKE_PATH=/home/runner/theos/makefiles \
             ARCHS="arm64 arm64e" \
             TARGET="iphone:clang:16.5" \
             THEOS_PACKAGE_SCHEME=rootless \
