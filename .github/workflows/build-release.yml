@@ -26,10 +26,10 @@ jobs:
           fi
           xcodebuild -version
 
-      - name: Install CocoaPods
+      - name: Install dependencies
         run: |
+          brew install ldid dpkg
           sudo gem install cocoapods --no-document
-          # Ensure gem bin is on PATH
           echo "$(ruby -e 'puts Gem.bindir')" >> $GITHUB_PATH
 
       - name: Generate TLS certificate + IdentityPass.swift
@@ -81,7 +81,6 @@ jobs:
 
       - name: Sign with ldid
         run: |
-          brew install ldid
           ldid -Ssrc/app.entitlements \
             package/SMServer.xcarchive/Products/Applications/SMServer.app/SMServer
 
