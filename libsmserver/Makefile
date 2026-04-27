@@ -14,7 +14,7 @@ TWEAK_NAME = libsmserver
 libsmserver_FILES = Tweak.xm
 libsmserver_CFLAGS = -fobjc-arc
 libsmserver_LIBRARIES = mryipc
-libsmserver_LDFLAGS = -L$(THEOS)/lib
+libsmserver_LDFLAGS = -L$(THEOS)/lib -Wl,-rpath,@loader_path/jbroot/usr/lib
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/aggregate.mk

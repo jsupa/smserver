@@ -181,6 +181,12 @@ jobs:
         run: |
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
           DEB=package/app_deb
+          # Strip leading 'v' from tag (v0.9.1 -> 0.9.1), fallback to control file version
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -z "$VERSION" ] && VERSION=$(grep '^Version:' package/DEBIAN/control | awk '{print $2}')
+
+          # Update version in control file to match tag
+          sed -i '' "s/^Version:.*/Version: ${VERSION}/" package/DEBIAN/control
 
           # App into rootless Applications
           mkdir -p "${DEB}/var/jb/Applications"
@@ -196,14 +202,17 @@ jobs:
           cp -r package/DEBIAN "${DEB}/DEBIAN"
           chmod 755 "${DEB}/DEBIAN/postinst" "${DEB}/DEBIAN/postrm"
 
-          dpkg-deb --build "${DEB}" package/SMServer_0.9.0_iphoneos-arm64.deb
-          echo "Built: $(ls -lh package/SMServer_0.9.0_iphoneos-arm64.deb)"
+          DEB_NAME="SMServer_${VERSION}_iphoneos-arm64.deb"
+          dpkg-deb --build "${DEB}" "package/${DEB_NAME}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "DEB_NAME=${DEB_NAME}" >> $GITHUB_ENV
+          echo "Built: $(ls -lh package/${DEB_NAME})"
 
       - name: Upload combined deb artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SMServer_0.9.0_iphoneos-arm64.deb
-          path: package/SMServer_0.9.0_iphoneos-arm64.deb
+          name: ${{ env.DEB_NAME }}
+          path: package/${{ env.DEB_NAME }}
 
   release:
     name: Create release
@@ -217,8 +226,9 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: SMServer_0.9.0_iphoneos-arm64.deb
+          pattern: SMServer_*_iphoneos-arm64.deb
           path: artifacts
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -231,8 +241,8 @@ jobs:
 
             ### Installation
             1. Install `SMServer` `.deb`
-            2. Open the Messages app once (so the tweak loads)
+            2. Open the Messages app once (so the tweak injects into MobileSMS)
             3. Open SMServer and connect via browser
-          files: artifacts/SMServer_0.9.0_iphoneos-arm64.deb
+          files: artifacts/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
