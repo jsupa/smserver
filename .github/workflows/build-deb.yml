@@ -6,9 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-env:
-  THEOS: /opt/theos
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,12 +24,11 @@ jobs:
         id: theos-cache
         with:
           path: /opt/theos
-          key: theos-ubuntu-v3
+          key: theos-ubuntu-v4
 
       - name: Clone Theos
         if: steps.theos-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --recursive https://github.com/theos/theos.git /opt/theos
+        run: git clone --recursive https://github.com/theos/theos.git /opt/theos
 
       - name: Download Linux toolchain
         if: steps.theos-cache.outputs.cache-hit != 'true'
@@ -55,23 +51,34 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
             -o /opt/theos/include/MRYIPCCenter.h
-          # Prázdna stub dylib pre linker
-          echo "" | /opt/theos/toolchain/linux/iphone/bin/clang \
+          # Stub dylib pre linker
+          echo "void _mryipc_stub(){}" > /tmp/stub.c
+          /opt/theos/toolchain/linux/iphone/bin/clang \
             -arch arm64 -arch arm64e \
-            -x c - -shared \
+            -shared \
             -isysroot /opt/theos/sdks/iPhoneOS16.5.sdk \
-            -o /opt/theos/lib/libmryipc.dylib 2>/dev/null || \
-          dd if=/dev/zero bs=1 count=4 2>/dev/null > /opt/theos/lib/libmryipc.dylib
+            /tmp/stub.c \
+            -o /opt/theos/lib/libmryipc.dylib 2>/dev/null \
+          || touch /opt/theos/lib/libmryipc.dylib
 
-      - name: Verify Theos make rules exist
+      - name: Debug – verify Theos layout
         run: |
-          echo "THEOS=$THEOS"
-          ls $THEOS/makefiles/
-          ls $THEOS/sdks/
+          echo "=== makefiles ==="
+          ls /opt/theos/makefiles/
+          echo "=== makefiles/master ==="
+          ls /opt/theos/makefiles/master/
+          echo "=== sdks ==="
+          ls /opt/theos/sdks/
+          echo "=== bin ==="
+          ls /opt/theos/bin/ || echo "no bin dir"
+          echo "=== make version ==="
+          make --version | head -1
 
       - name: Build deb
         run: |
-          export PATH="$THEOS/bin:$PATH"
+          export THEOS=/opt/theos
+          export THEOS_MAKE_PATH=/opt/theos/makefiles
+          export PATH="/opt/theos/bin:$PATH"
           cd libsmserver
           make package \
             ARCHS="arm64 arm64e" \
@@ -101,13 +108,13 @@ jobs:
           body: |
             ## libsmserver – rootless build pre iOS 16 + RootHide
 
-            ### Zmeny oproti originálu
-            - Pridaný `processCapabilities` hook pre iOS 16+ (hodnota `4485895`)
-            - Rootless/RootHide kompatibilita (`iphoneos-arm64`)
+            ### Zmeny
+            - `processCapabilities` hook pre iOS 16+ (hodnota `4485895`)
+            - Rootless/RootHide (`iphoneos-arm64`)
             - arm64 + arm64e fat binary
 
             ### Inštalácia
-            1. Stiahni `.deb` nižšie
+            1. Stiahni `.deb`
             2. Presuň na telefón (AirDrop / iMazing / SCP)
             3. Otvor v **Sileo** → nainštaluj
             4. Respring
