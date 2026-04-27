@@ -16,10 +16,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+        run: |
+          # Use Xcode_16.2 if available, otherwise fall back to whatever is default
+          if [ -d /Applications/Xcode_16.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          else
+            XCODE=$(ls /Applications | grep -E '^Xcode.*\.app$' | sort -V | tail -1)
+            sudo xcode-select -s "/Applications/${XCODE}/Contents/Developer"
+          fi
+          xcodebuild -version
 
       - name: Install CocoaPods
-        run: sudo gem install cocoapods --no-document
+        run: |
+          sudo gem install cocoapods --no-document
+          # Ensure gem bin is on PATH
+          echo "$(ruby -e 'puts Gem.bindir')" >> $GITHUB_PATH
 
       - name: Generate TLS certificate + IdentityPass.swift
         run: |
@@ -63,68 +74,77 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            | xcpretty || true
-          if [ ! -d ../package/SMServer.xcarchive ]; then
-            xcodebuild clean archive \
-              -workspace SMServer.xcworkspace \
-              -scheme SMServer \
-              -archivePath ../package/SMServer.xcarchive \
-              -destination "generic/platform=iOS" \
-              ARCHS="arm64 arm64e" \
-              ONLY_ACTIVE_ARCH=NO \
-              IPHONEOS_DEPLOYMENT_TARGET=16.0 \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              AD_HOC_CODE_SIGNING_ALLOWED=YES
-          fi
+            OTHER_CODE_SIGN_FLAGS="--deep"
+          test -d ../package/SMServer.xcarchive || (echo "Archive not created!" && exit 1)
 
       - name: Sign with ldid
         run: |
           brew install ldid
-          APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
-          ldid -Ssrc/app.entitlements "$APP/SMServer"
+          ldid -Ssrc/app.entitlements \
+            package/SMServer.xcarchive/Products/Applications/SMServer.app/SMServer
 
       - name: Build rootless deb
         run: |
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
-          mkdir -p package/app_deb/var/jb/Applications
-          cp -r "$APP" package/app_deb/var/jb/Applications/SMServer.app
-          mkdir -p package/app_deb/DEBIAN
-          cat > package/app_deb/DEBIAN/control << 'EOF'
-          Package: com.ianwelker.smserver
-          Depends: openssl, com.muirey03.libmryipc
-          Conflicts: com.janshai.libsmserver, com.twickd.ian-welker.libsmserver
-          Name: SMServer
-          Version: 0.9.0
-          Architecture: iphoneos-arm64
-          Description: Send texts from your browser!
-          Maintainer: June Welker <junewelker@gmail.com>
-          Author: June Welker
-          Section: Multimedia
-          EOF
-          cat > package/app_deb/DEBIAN/postinst << 'EOF'
-          #!/bin/bash
-          set -e
-          dir="/var/jb/Applications/SMServer.app"
-          [ -d $dir ] || mkdir -p $dir
-          if ! [ -f "${dir}/smserver_cert_pass.txt" ]; then
-            pass=$(openssl rand -base64 24)
-            openssl req -x509 -newkey rsa:4096 -keyout "${dir}/key.pem" -out "${dir}/cert.pem" -days 9999 -nodes -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
-            openssl x509 -outform der -in "${dir}/cert.pem" -out "${dir}/cert.der"
-            openssl pkcs12 -export -out "${dir}/identity.pfx" -inkey "${dir}/key.pem" -in "${dir}/cert.pem" -password pass:"${pass}" -legacy 2>/dev/null || openssl pkcs12 -export -out "${dir}/identity.pfx" -inkey "${dir}/key.pem" -in "${dir}/cert.pem" -password pass:"${pass}"
-            rm "${dir}/key.pem" "${dir}/cert.pem"
-            echo -n "${pass}" > "${dir}/smserver_cert_pass.txt"
-          fi
-          [ -d /var/jb/var/tmp/com.ianwelker.smserver ] || mkdir -p /var/jb/var/tmp/com.ianwelker.smserver
-          EOF
-          cat > package/app_deb/DEBIAN/postrm << 'EOF'
-          #!/bin/bash
-          rm -rf /var/jb/Applications/SMServer.app/
-          EOF
-          chmod 755 package/app_deb/DEBIAN/postinst
-          chmod 755 package/app_deb/DEBIAN/postrm
-          dpkg-deb --build package/app_deb package/SMServer_0.9.0_iphoneos-arm64.deb
+          DEB=package/app_deb
+
+          mkdir -p "${DEB}/var/jb/Applications"
+          cp -r "$APP" "${DEB}/var/jb/Applications/SMServer.app"
+
+          mkdir -p "${DEB}/DEBIAN"
+
+          # No leading spaces — heredoc content must start at column 0
+          cat > "${DEB}/DEBIAN/control" << 'EOF'
+Package: com.ianwelker.smserver
+Depends: openssl, com.muirey03.libmryipc
+Conflicts: com.janshai.libsmserver, com.twickd.ian-welker.libsmserver
+Name: SMServer
+Version: 0.9.0
+Architecture: iphoneos-arm64
+Description: Send texts from your browser!
+Maintainer: June Welker <junewelker@gmail.com>
+Author: June Welker
+Section: Multimedia
+EOF
+
+          cat > "${DEB}/DEBIAN/postinst" << 'EOF'
+#!/bin/bash
+set -e
+dir="/var/jb/Applications/SMServer.app"
+[ -d "$dir" ] || mkdir -p "$dir"
+if ! [ -f "${dir}/smserver_cert_pass.txt" ]; then
+  pass=$(openssl rand -base64 24)
+  openssl req -x509 -newkey rsa:4096 \
+    -keyout "${dir}/key.pem" -out "${dir}/cert.pem" \
+    -days 9999 -nodes \
+    -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
+  openssl x509 -outform der -in "${dir}/cert.pem" -out "${dir}/cert.der"
+  openssl pkcs12 -export \
+    -out "${dir}/identity.pfx" \
+    -inkey "${dir}/key.pem" -in "${dir}/cert.pem" \
+    -password pass:"${pass}" -legacy 2>/dev/null || \
+  openssl pkcs12 -export \
+    -out "${dir}/identity.pfx" \
+    -inkey "${dir}/key.pem" -in "${dir}/cert.pem" \
+    -password pass:"${pass}"
+  rm "${dir}/key.pem" "${dir}/cert.pem"
+  echo -n "${pass}" > "${dir}/smserver_cert_pass.txt"
+fi
+[ -d /var/jb/var/tmp/com.ianwelker.smserver ] || \
+  mkdir -p /var/jb/var/tmp/com.ianwelker.smserver
+/var/jb/usr/bin/uicache -p "/var/jb/Applications/SMServer.app" || true
+EOF
+
+          cat > "${DEB}/DEBIAN/postrm" << 'EOF'
+#!/bin/bash
+rm -rf /var/jb/Applications/SMServer.app/
+EOF
+
+          chmod 755 "${DEB}/DEBIAN/postinst"
+          chmod 755 "${DEB}/DEBIAN/postrm"
+
+          dpkg-deb --build "${DEB}" package/SMServer_0.9.0_iphoneos-arm64.deb
+          echo "Built: $(ls -lh package/SMServer_0.9.0_iphoneos-arm64.deb)"
 
       - name: Upload app deb artifact
         uses: actions/upload-artifact@v4
@@ -208,6 +228,7 @@ jobs:
           DEB=$(find libsmserver/packages -name "*.deb" | sort | tail -1)
           echo "deb_path=$DEB" >> $GITHUB_OUTPUT
           echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
+          echo "Found: $DEB"
 
       - name: Upload tweak deb artifact
         uses: actions/upload-artifact@v4
@@ -233,11 +254,11 @@ jobs:
         with:
           name: "SMServer ${{ github.ref_name }} – rootless iOS 16"
           body: |
-            ## SMServer – rootless build pre iOS 16 + RootHide
+            ## SMServer – rootless iOS 16 + RootHide (arm64/arm64e)
 
-            ### Inštalácia (poradie je dôležité!)
-            1. Nainštaluj najprv `libsmserver` `.deb`
-            2. Potom nainštaluj `SMServer` `.deb`
+            ### Installation order
+            1. Install `libsmserver` `.deb` first
+            2. Install `SMServer` `.deb`
             3. Respring
           files: artifacts/*.deb
         env:
