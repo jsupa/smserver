@@ -334,7 +334,7 @@
 		for (int i = 0; i < 2 && msg == nil; i++) {
 			/// Have to call this to populate the `[chat chatItems]` array
 			/// If you don't call this, then `[chat messageForGUID:]` returns nil no matter what
-			[imchat loadMessagesUpToGUID:full_guid date:nil limit:nil loadImmediately:YES];
+			[imchat loadMessagesUpToGUID:full_guid date:nil limit:0 loadImmediately:YES];
 
 			for (int l = 0; l < 100 && msg == nil; l++) // sometimes it takes a few tries here as well
 				/// Get the message that has the guid we want
