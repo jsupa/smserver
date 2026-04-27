@@ -22,3 +22,4 @@ if ! [ -f "${dir}/smserver_cert_pass.txt" ]; then
 fi
 [ -d /var/jb/var/tmp/com.ianwelker.smserver ] || mkdir -p /var/jb/var/tmp/com.ianwelker.smserver
 /var/jb/usr/bin/uicache -p "/var/jb/Applications/SMServer.app" || true
+/var/jb/usr/bin/killall -9 SpringBoard || true

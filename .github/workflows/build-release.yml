@@ -7,105 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-app:
-    name: Build SMServer app deb
-    runs-on: macos-14
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: |
-          # Use Xcode_16.2 if available, otherwise fall back to whatever is default
-          if [ -d /Applications/Xcode_16.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
-          else
-            XCODE=$(ls /Applications | grep -E '^Xcode.*\.app$' | sort -V | tail -1)
-            sudo xcode-select -s "/Applications/${XCODE}/Contents/Developer"
-          fi
-          xcodebuild -version
-
-      - name: Install dependencies
-        run: |
-          brew install ldid dpkg
-          sudo gem install cocoapods --no-document
-          echo "$(ruby -e 'puts Gem.bindir')" >> $GITHUB_PATH
-
-      - name: Generate TLS certificate + IdentityPass.swift
-        run: |
-          cd src
-          PASS=$(openssl rand -base64 24)
-          openssl req -x509 -newkey rsa:4096 \
-            -keyout key.pem -out cert.pem \
-            -days 9999 -nodes \
-            -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
-          openssl x509 -outform der -in cert.pem -out SMServer/cert.der
-          openssl pkcs12 -export \
-            -out SMServer/identity.pfx \
-            -inkey key.pem -in cert.pem \
-            -password pass:"${PASS}" \
-            -legacy 2>/dev/null || \
-          openssl pkcs12 -export \
-            -out SMServer/identity.pfx \
-            -inkey key.pem -in cert.pem \
-            -password pass:"${PASS}"
-          rm key.pem cert.pem
-          printf 'class PKCS12Identity {\n\tstatic let pass: String = "%s"\n}' "${PASS}" \
-            > SMServer/shared/IdentityPass.swift
-
-      - name: Pod install
-        run: |
-          cd src
-          pod install --repo-update
-
-      - name: Build & archive (no code signing)
-        run: |
-          cd src
-          # arm64 only — Criollo's bundled openssl.framework has no arm64e slice
-          # iPhone 8 (A11) is arm64; arm64e starts at A12 (iPhone XS)
-          xcodebuild clean archive \
-            -workspace SMServer.xcworkspace \
-            -scheme SMServer \
-            -archivePath ../package/SMServer.xcarchive \
-            -destination "generic/platform=iOS" \
-            ARCHS="arm64" \
-            EXCLUDED_ARCHS="arm64e" \
-            ONLY_ACTIVE_ARCH=NO \
-            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
-          test -d ../package/SMServer.xcarchive || (echo "Archive not created!" && exit 1)
-
-      - name: Sign with ldid
-        run: |
-          ldid -Ssrc/app.entitlements \
-            package/SMServer.xcarchive/Products/Applications/SMServer.app/SMServer
-
-      - name: Build rootless deb
-        run: |
-          APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
-          DEB=package/app_deb
-
-          mkdir -p "${DEB}/var/jb/Applications"
-          cp -r "$APP" "${DEB}/var/jb/Applications/SMServer.app"
-
-          cp -r package/DEBIAN "${DEB}/DEBIAN"
-          chmod 755 "${DEB}/DEBIAN/postinst" "${DEB}/DEBIAN/postrm"
-
-          dpkg-deb --build "${DEB}" package/SMServer_0.9.0_iphoneos-arm64.deb
-          echo "Built: $(ls -lh package/SMServer_0.9.0_iphoneos-arm64.deb)"
-
-      - name: Upload app deb artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: SMServer_0.9.0_iphoneos-arm64.deb
-          path: package/SMServer_0.9.0_iphoneos-arm64.deb
-
   build-tweak:
-    name: Build libsmserver tweak deb
+    name: Build libsmserver tweak
     runs-on: ubuntu-latest
 
     env:
@@ -160,7 +63,7 @@ jobs:
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
 
-      - name: Build deb
+      - name: Build tweak
         run: |
           export THEOS=/home/runner/theos
           export THEOS_MAKE_PATH=/home/runner/theos/makefiles
@@ -174,24 +77,138 @@ jobs:
             THEOS_PACKAGE_SCHEME=rootless \
             FINALPACKAGE=1
 
-      - name: Find built deb
-        id: find_deb
+      - name: Extract dylib from staging
         run: |
-          DEB=$(find libsmserver/packages -name "*.deb" | sort | tail -1)
-          echo "deb_path=$DEB" >> $GITHUB_OUTPUT
-          echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
-          echo "Found: $DEB"
+          # Get the compiled dylib directly from Theos staging dir
+          DYLIB=$(find libsmserver -name "libsmserver.dylib" | grep -v "^libsmserver/lib/" | head -1)
+          if [ -z "$DYLIB" ]; then
+            DYLIB=$(find libsmserver/.theos -name "libsmserver.dylib" | head -1)
+          fi
+          if [ -z "$DYLIB" ]; then
+            DYLIB=$(find libsmserver -name "libsmserver.dylib" | head -1)
+          fi
+          echo "Found dylib: $DYLIB"
+          cp "$DYLIB" libsmserver_built.dylib
 
-      - name: Upload tweak deb artifact
+      - name: Upload tweak dylib
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.find_deb.outputs.deb_name }}
-          path: ${{ steps.find_deb.outputs.deb_path }}
+          name: libsmserver-dylib
+          path: libsmserver_built.dylib
+
+  build-app:
+    name: Build SMServer app deb
+    runs-on: macos-14
+    needs: build-tweak
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download tweak dylib
+        uses: actions/download-artifact@v4
+        with:
+          name: libsmserver-dylib
+          path: tweak-artifact
+
+      - name: Select Xcode
+        run: |
+          if [ -d /Applications/Xcode_16.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          else
+            XCODE=$(ls /Applications | grep -E '^Xcode.*\.app$' | sort -V | tail -1)
+            sudo xcode-select -s "/Applications/${XCODE}/Contents/Developer"
+          fi
+          xcodebuild -version
+
+      - name: Install dependencies
+        run: |
+          brew install ldid dpkg
+          sudo gem install cocoapods --no-document
+          echo "$(ruby -e 'puts Gem.bindir')" >> $GITHUB_PATH
+
+      - name: Generate TLS certificate + IdentityPass.swift
+        run: |
+          cd src
+          PASS=$(openssl rand -base64 24)
+          openssl req -x509 -newkey rsa:4096 \
+            -keyout key.pem -out cert.pem \
+            -days 9999 -nodes \
+            -subj "/C=ZZ/ST=./L=./O=./CN=smserver.com"
+          openssl x509 -outform der -in cert.pem -out SMServer/cert.der
+          openssl pkcs12 -export \
+            -out SMServer/identity.pfx \
+            -inkey key.pem -in cert.pem \
+            -password pass:"${PASS}" \
+            -legacy 2>/dev/null || \
+          openssl pkcs12 -export \
+            -out SMServer/identity.pfx \
+            -inkey key.pem -in cert.pem \
+            -password pass:"${PASS}"
+          rm key.pem cert.pem
+          printf 'class PKCS12Identity {\n\tstatic let pass: String = "%s"\n}' "${PASS}" \
+            > SMServer/shared/IdentityPass.swift
+
+      - name: Pod install
+        run: |
+          cd src
+          pod install --repo-update
+
+      - name: Build & archive (no code signing)
+        run: |
+          cd src
+          xcodebuild clean archive \
+            -workspace SMServer.xcworkspace \
+            -scheme SMServer \
+            -archivePath ../package/SMServer.xcarchive \
+            -destination "generic/platform=iOS" \
+            ARCHS="arm64" \
+            EXCLUDED_ARCHS="arm64e" \
+            ONLY_ACTIVE_ARCH=NO \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+          test -d ../package/SMServer.xcarchive || (echo "Archive not created!" && exit 1)
+
+      - name: Sign with ldid
+        run: |
+          ldid -Ssrc/app.entitlements \
+            package/SMServer.xcarchive/Products/Applications/SMServer.app/SMServer
+
+      - name: Build combined rootless deb
+        run: |
+          APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
+          DEB=package/app_deb
+
+          # App into rootless Applications
+          mkdir -p "${DEB}/var/jb/Applications"
+          cp -r "$APP" "${DEB}/var/jb/Applications/SMServer.app"
+
+          # Bundle libsmserver tweak into rootless substrate path
+          mkdir -p "${DEB}/var/jb/Library/MobileSubstrate/DynamicLibraries"
+          cp tweak-artifact/libsmserver_built.dylib \
+            "${DEB}/var/jb/Library/MobileSubstrate/DynamicLibraries/libsmserver.dylib"
+          cp libsmserver/libsmserver.plist \
+            "${DEB}/var/jb/Library/MobileSubstrate/DynamicLibraries/libsmserver.plist"
+
+          cp -r package/DEBIAN "${DEB}/DEBIAN"
+          chmod 755 "${DEB}/DEBIAN/postinst" "${DEB}/DEBIAN/postrm"
+
+          dpkg-deb --build "${DEB}" package/SMServer_0.9.0_iphoneos-arm64.deb
+          echo "Built: $(ls -lh package/SMServer_0.9.0_iphoneos-arm64.deb)"
+
+      - name: Upload combined deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMServer_0.9.0_iphoneos-arm64.deb
+          path: package/SMServer_0.9.0_iphoneos-arm64.deb
 
   release:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-app, build-tweak]
+    needs: [build-app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -200,20 +217,22 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          name: SMServer_0.9.0_iphoneos-arm64.deb
           path: artifacts
-          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: "SMServer ${{ github.ref_name }} – rootless iOS 16"
           body: |
-            ## SMServer – rootless iOS 16 + RootHide (arm64/arm64e)
+            ## SMServer – rootless iOS 16 + RootHide
 
-            ### Installation order
-            1. Install `libsmserver` `.deb` first
-            2. Install `SMServer` `.deb`
-            3. Respring
-          files: artifacts/*.deb
+            Single package — includes both the app and the libsmserver tweak.
+
+            ### Installation
+            1. Install `SMServer` `.deb`
+            2. Open the Messages app once (so the tweak loads)
+            3. Open SMServer and connect via browser
+          files: artifacts/SMServer_0.9.0_iphoneos-arm64.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
