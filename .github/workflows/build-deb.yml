@@ -57,14 +57,8 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
             -o $THEOS/include/MRYIPCCenter.h
-          echo "void _stub(){}" > /tmp/stub.c
-          $THEOS/toolchain/linux/iphone/bin/clang \
-            -arch arm64 -arch arm64e \
-            -shared \
-            -isysroot $THEOS/sdks/iPhoneOS16.5.sdk \
-            /tmp/stub.c \
-            -o $THEOS/lib/libmryipc.dylib 2>/dev/null \
-          || touch $THEOS/lib/libmryipc.dylib
+          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
+            -o $THEOS/lib/libmryipc.dylib
 
       - name: Build deb
         run: |
