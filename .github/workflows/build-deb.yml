@@ -1,0 +1,92 @@
+name: Build libsmserver rootless deb
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos
+        uses: actions/cache@v4
+        id: theos-cache
+        with:
+          path: /opt/theos
+          key: theos-${{ runner.os }}-v1
+
+      - name: Setup Theos (if not cached)
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y fakeroot dpkg-dev
+          git clone --recursive https://github.com/theos/theos.git /opt/theos
+          git -C /opt/theos submodule update --init --recursive
+
+      - name: Download iOS 16.5 SDK
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: /opt/theos/sdks
+          key: theos-sdk-16.5-v1
+
+      - name: Fetch SDK (if not cached)
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/theos/sdks
+          curl -L https://github.com/theos/sdks/releases/download/2024-09/iPhoneOS16.5.sdk.tar.xz \
+            -o /tmp/sdk.tar.xz
+          tar -xJf /tmp/sdk.tar.xz -C /opt/theos/sdks
+
+      - name: Install libMRYIPC headers + stub
+        run: |
+          mkdir -p /opt/theos/include /opt/theos/lib
+          # Headers
+          curl -L https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
+            -o /opt/theos/include/MRYIPCCenter.h
+          # Stub dylib pre linker (prázdna, len pre build)
+          printf '\x00' > /opt/theos/lib/libmryipc.dylib
+
+      - name: Build deb
+        run: |
+          export THEOS=/opt/theos
+          export PATH="$THEOS/bin:$PATH"
+          cd libsmserver
+          make package \
+            ARCHS="arm64 arm64e" \
+            TARGET="iphone:clang:16.5" \
+            THEOS_PACKAGE_SCHEME=rootless \
+            FINALPACKAGE=1
+
+      - name: Find built deb
+        id: find_deb
+        run: |
+          DEB=$(find libsmserver/packages -name "*.deb" | head -1)
+          echo "deb_path=$DEB" >> $GITHUB_OUTPUT
+          echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
+
+      - name: Create Release and upload deb
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "libsmserver ${{ github.ref_name }} (rootless/RootHide iOS 16)"
+          body: |
+            ## libsmserver – rootless build pre iOS 16 + RootHide
+
+            ### Zmeny oproti originálu
+            - Pridaný `processCapabilities` hook pre iOS 16+ (hodnota `4485895`)
+            - Rootless/RootHide kompatibilita (`iphoneos-arm64`)
+            - arm64 + arm64e fat binary
+
+            ### Inštalácia
+            1. Presuň `.deb` na telefón (AirDrop / SCP)
+            2. Otvor v **Sileo** a nainštaluj
+            3. Respring / reboot
+          files: ${{ steps.find_deb.outputs.deb_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
