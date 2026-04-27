@@ -1,4 +1,4 @@
-name: Build SMServer app deb
+name: Build SMServer release
 
 on:
   push:
@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-app:
+    name: Build SMServer app deb
     runs-on: macos-14
 
     steps:
@@ -63,7 +64,6 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             | xcpretty || true
-          # Fallback bez xcpretty ak nie je nainštalovaný
           if [ ! -d ../package/SMServer.xcarchive ]; then
             xcodebuild clean archive \
               -workspace SMServer.xcworkspace \
@@ -79,7 +79,7 @@ jobs:
               AD_HOC_CODE_SIGNING_ALLOWED=YES
           fi
 
-      - name: Sign with ldid (fake codesign pre jailbreak)
+      - name: Sign with ldid
         run: |
           brew install ldid
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
@@ -88,12 +88,8 @@ jobs:
       - name: Build rootless deb
         run: |
           APP=package/SMServer.xcarchive/Products/Applications/SMServer.app
-
-          # Rootless: app ide do /var/jb/Applications/
           mkdir -p package/app_deb/var/jb/Applications
           cp -r "$APP" package/app_deb/var/jb/Applications/SMServer.app
-
-          # DEBIAN control pre rootless
           mkdir -p package/app_deb/DEBIAN
           cat > package/app_deb/DEBIAN/control << 'EOF'
           Package: com.ianwelker.smserver
@@ -107,8 +103,6 @@ jobs:
           Author: June Welker
           Section: Multimedia
           EOF
-
-          # postinst pre rootless (cesty s /var/jb/)
           cat > package/app_deb/DEBIAN/postinst << 'EOF'
           #!/bin/bash
           set -e
@@ -124,39 +118,127 @@ jobs:
           fi
           [ -d /var/jb/var/tmp/com.ianwelker.smserver ] || mkdir -p /var/jb/var/tmp/com.ianwelker.smserver
           EOF
-
           cat > package/app_deb/DEBIAN/postrm << 'EOF'
           #!/bin/bash
           rm -rf /var/jb/Applications/SMServer.app/
           EOF
-
           chmod 755 package/app_deb/DEBIAN/postinst
           chmod 755 package/app_deb/DEBIAN/postrm
-
           dpkg-deb --build package/app_deb package/SMServer_0.9.0_iphoneos-arm64.deb
 
-      - name: Upload artifact
+      - name: Upload app deb artifact
         uses: actions/upload-artifact@v4
         with:
           name: SMServer_0.9.0_iphoneos-arm64.deb
           path: package/SMServer_0.9.0_iphoneos-arm64.deb
 
+  build-tweak:
+    name: Build libsmserver tweak deb
+    runs-on: ubuntu-latest
+
+    env:
+      THEOS: /home/runner/theos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get install -y build-essential fakeroot rsync curl perl zip git \
+            libxml2 libtinfo6 libplist-utils
+
+      - name: Cache Theos + toolchain + SDKs
+        uses: actions/cache@v4
+        id: theos-cache
+        with:
+          path: /home/runner/theos
+          key: theos-home-v1
+
+      - name: Install Theos
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: git clone --recursive https://github.com/theos/theos.git $THEOS
+
+      - name: Run update-theos
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: $THEOS/bin/update-theos
+
+      - name: Download Linux toolchain
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $THEOS/toolchain
+          wget -q https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.3.0/swift-5.8-ubuntu22.04.tar.xz \
+            -O /tmp/toolchain.tar.xz
+          tar -xf /tmp/toolchain.tar.xz -C $THEOS/toolchain
+
+      - name: Download iOS 16.5 SDK
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          wget -q https://github.com/theos/sdks/archive/master.zip -O /tmp/sdks.zip
+          unzip -q /tmp/sdks.zip -d /tmp/sdks
+          mv /tmp/sdks/sdks-master/*.sdk $THEOS/sdks/
+
+      - name: Install libMRYIPC
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
+            -o $THEOS/include/MRYIPCCenter.h
+          mkdir -p $THEOS/lib/iphone/rootless
+          curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
+            -o $THEOS/lib/libmryipc.dylib
+          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
+          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
+
+      - name: Build deb
+        run: |
+          export THEOS=/home/runner/theos
+          export THEOS_MAKE_PATH=/home/runner/theos/makefiles
+          export PATH="/home/runner/theos/bin:$PATH"
+          cd libsmserver
+          make package \
+            THEOS=/home/runner/theos \
+            THEOS_MAKE_PATH=/home/runner/theos/makefiles \
+            ARCHS="arm64 arm64e" \
+            TARGET="iphone:clang:16.5" \
+            THEOS_PACKAGE_SCHEME=rootless \
+            FINALPACKAGE=1
+
+      - name: Find built deb
+        id: find_deb
+        run: |
+          DEB=$(find libsmserver/packages -name "*.deb" | sort | tail -1)
+          echo "deb_path=$DEB" >> $GITHUB_OUTPUT
+          echo "deb_name=$(basename $DEB)" >> $GITHUB_OUTPUT
+
+      - name: Upload tweak deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_deb.outputs.deb_name }}
+          path: ${{ steps.find_deb.outputs.deb_path }}
+
+  release:
+    name: Create release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-app, build-tweak]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: "SMServer ${{ github.ref_name }} – rootless iOS 16"
           body: |
             ## SMServer – rootless build pre iOS 16 + RootHide
 
-            ### Obsah releasu
-            - `SMServer_*_iphoneos-arm64.deb` – hlavná app (inštaluje do `/var/jb/Applications/`)
-            - `libsmserver_*_iphoneos-arm64.deb` – tweak (z druhého workflow)
-
             ### Inštalácia (poradie je dôležité!)
             1. Nainštaluj najprv `libsmserver` `.deb`
             2. Potom nainštaluj `SMServer` `.deb`
             3. Respring
-          files: package/SMServer_0.9.0_iphoneos-arm64.deb
+          files: artifacts/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
