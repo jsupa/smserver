@@ -39,7 +39,10 @@ jobs:
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p /opt/theos/sdks
-          curl -L https://github.com/theos/sdks/releases/download/2024-09/iPhoneOS16.5.sdk.tar.xz \
+          # Get latest tag from theos/sdks releases API
+          TAG=$(curl -s https://api.github.com/repos/theos/sdks/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+          echo "Using SDK tag: $TAG"
+          curl -L "https://github.com/theos/sdks/releases/download/${TAG}/iPhoneOS16.5.sdk.tar.xz" \
             -o /tmp/sdk.tar.xz
           tar -xJf /tmp/sdk.tar.xz -C /opt/theos/sdks
 
