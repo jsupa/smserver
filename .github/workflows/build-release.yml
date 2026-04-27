@@ -57,12 +57,11 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/MRYIPCCenter.h \
             -o $THEOS/include/MRYIPCCenter.h
-          mkdir -p $THEOS/lib/iphone/rootless $THEOS/lib/iphone/roothide
+          mkdir -p $THEOS/lib/iphone/rootless
           curl -fsSL https://raw.githubusercontent.com/Muirey03/MRYIPC/master/usr/lib/libmryipc.dylib \
             -o $THEOS/lib/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/libmryipc.dylib
           cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/rootless/libmryipc.dylib
-          cp $THEOS/lib/libmryipc.dylib $THEOS/lib/iphone/roothide/libmryipc.dylib
 
       - name: Build tweak
         run: |
@@ -75,21 +74,23 @@ jobs:
             THEOS_MAKE_PATH=/home/runner/theos/makefiles \
             ARCHS="arm64 arm64e" \
             TARGET="iphone:clang:16.5" \
-            THEOS_PACKAGE_SCHEME=roothide \
+            THEOS_PACKAGE_SCHEME=rootless \
             FINALPACKAGE=1
 
-      - name: Extract dylib from staging
+      - name: Extract and fix dylib
         run: |
-          # Get the compiled dylib directly from Theos staging dir
           DYLIB=$(find libsmserver -name "libsmserver.dylib" | grep -v "^libsmserver/lib/" | head -1)
-          if [ -z "$DYLIB" ]; then
-            DYLIB=$(find libsmserver/.theos -name "libsmserver.dylib" | head -1)
-          fi
-          if [ -z "$DYLIB" ]; then
-            DYLIB=$(find libsmserver -name "libsmserver.dylib" | head -1)
-          fi
+          [ -z "$DYLIB" ] && DYLIB=$(find libsmserver -name "libsmserver.dylib" | head -1)
           echo "Found dylib: $DYLIB"
           cp "$DYLIB" libsmserver_built.dylib
+
+          # Strip the rpath that RootHide patcher tries to add — prevents duplicate rpath error
+          for ARCH in arm64 arm64e; do
+            install_name_tool -delete_rpath @loader_path/.jbroot/usr/lib \
+              libsmserver_built.dylib 2>/dev/null || true
+          done
+          echo "RPATHs after fix:"
+          otool -l libsmserver_built.dylib | grep -A2 LC_RPATH || true
 
       - name: Upload tweak dylib
         uses: actions/upload-artifact@v4
