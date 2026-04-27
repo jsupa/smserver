@@ -1,10 +1,10 @@
 name: Build SMServer app deb
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      disabled:
+        description: 'This workflow is superseded by build-release.yml'
 
 jobs:
   build:
