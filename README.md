@@ -1,25 +1,61 @@
-# SMServer12 — iOS 12 CLI Guide
+# SMServer12 — iOS 12 SMS Gateway
 
-SMServer lets you send/receive SMS and iMessages from a web browser on a jailbroken iPhone.
+Run SMServer on a jailbroken iPhone 6 (iOS 12.5.8) as a persistent background service, accessible from your Mac over USB.
 
-## Device Info
+## Quick Start
 
-| Spec | Detail |
-|------|--------|
-| **Device** | iPhone 6 (iPhone7,2) |
-| **iOS** | 12.5.8 (16H88) |
-| **Jailbreak** | Amethyst |
-| **Package Manager** | Sileo |
-| **Architecture** | ARM64 |
-| **SSH User** | `mobile` / `root` |
+```bash
+./setup-sms-phone.sh
+```
 
-## App Info
+Then open **http://localhost:8085/** (default password: `toor`)
 
-| Field | Detail |
-|-------|--------|
-| **App** | SMServer12 (CLI-only, iOS 12 compatible) |
-| **Version** | 0.7.4 (binary) / 0.8.0 (package) |
-| **Bundle ID** | `com.ianwelker.smserver` |
-| **Binary** | `/Applications/SMServer12.app/SMServer12` |
-| **Source** | [itsjunetime/smserver](https://github.com/itsjunetime/smserver) |
-| **iOS 12 Issue** | [#129](https://github.com/itsjunetime/smserver/issues/129) |
+## What This Repo Contains
+
+| File | Purpose |
+|------|---------|
+| `setup-sms-phone.sh` | One-shot script — SSH tunnel, launch SMServer daemon, HTTP+WS tunnels, validation |
+| `INSTALL.md` | How to install SMServer12 from `.deb` on iOS 12 |
+| `CLI.md` | Full CLI flag reference for SMServer12 |
+| `TUNNELING.md` | Port forwarding guide — `iproxy`, USB, WiFi, SSH tunnels |
+| `DEVICE-INFO.md` | How to get device info (UDID, iOS version, model, etc.) |
+| `DEBUG.md` | Debug journey — all the crashes and how they were solved |
+| `SMServer12.deb` | Pre-built CLI-only `.deb` for iOS 12 |
+
+## Architecture
+
+```
+[Your Mac]                              [iPhone 6, iOS 12.5.8]
+                                        
+  Browser ──▶ localhost:8085 ── iproxy ──▶ device:8080 (HTTP)
+       └──▶ localhost:8081 ── iproxy ──▶ device:8081 (WebSocket)
+                                        
+  Terminal ──▶ localhost:2225 ── iproxy ──▶ device:22 (SSH)
+```
+
+SMServer runs via a wrapper script (`/tmp/run-smserver.sh`) that keeps it alive:
+- `tail -f /dev/null |` pipe keeps stdin open (SMServer exits on stdin EOF)
+- Auto-restarts on crash (2s interval)
+- `nohup` + daemon loop survives SSH disconnect
+
+## Port Map
+
+| Service | Mac (localhost) | iPhone | Purpose |
+|---------|:---:|:---:|---------|
+| SSH | 2225 | 22 | Terminal access |
+| SMServer HTTP | 8085 | 8080 | Web UI + REST API |
+| SMServer WebSocket | 8081 | 8081 | Real-time updates |
+
+## Default Credentials
+
+| Field | Default |
+|-------|---------|
+| SSH user | `root` |
+| SMServer password | `toor` |
+| SMServer auth | Disabled (`--no_authentication`) |
+| SMServer TLS | Disabled (`--no_secure`) |
+
+## Links
+
+- [SMServer source](https://github.com/itsjunetime/smserver) — original project by [itsjunetime](https://github.com/itsjunetime)
+- [iOS 12 compatibility issue](https://github.com/itsjunetime/smserver/issues/129) — where the CLI build came from
