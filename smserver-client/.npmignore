@@ -1,0 +1,6 @@
+src/
+examples/
+debug-output/
+tsconfig.json
+tsdown.config.ts
+.gitignore
