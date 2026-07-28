@@ -1,6 +1,6 @@
 {
   "name": "smserver-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TypeScript client for SMServer — iMessage gateway API",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -43,7 +43,17 @@
     "api-client"
   ],
   "packageManager": "pnpm@9.0.0",
+  "author": "Jakub Supa <jakub.supa@icloud.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jsupa/smserver.git",
+    "directory": "smserver-client"
+  },
+  "homepage": "https://github.com/jsupa/smserver#readme",
+  "bugs": {
+    "url": "https://github.com/jsupa/smserver/issues"
+  },
   "dependencies": {
     "got": "^14.4.0",
     "ws": "^8.18.0"
