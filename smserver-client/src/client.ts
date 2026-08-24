@@ -79,6 +79,11 @@ export class SMServerClient extends EventEmitter<SMServerEvents> {
     return this.rest.getMessages(chatId, opts);
   }
 
+  /** Mark a chat as seen/read and return its latest messages */
+  async seenMessages(chatId: string, numMessages = 1): Promise<Message[]> {
+    return this.rest.seenMessages(chatId, numMessages);
+  }
+
   async getChats(opts?: ChatOptions): Promise<Chat[]> {
     return this.rest.getChats(opts);
   }
@@ -148,6 +153,33 @@ export class SMServerClient extends EventEmitter<SMServerEvents> {
   /** Get full URL for a camera roll photo */
   getPhotoUrl(path: string): string {
     return `${this["baseUrl"]}/data?${new URLSearchParams({ photo: path }).toString()}`;
+  }
+
+  // ── Image Helpers ──
+
+  /** Full URLs for every image attachment on a message */
+  getImageUrls(message: Message): string[] {
+    return message.attachments
+      .filter((att) => att.mime_type.startsWith("image/"))
+      .map((att) => this.getAttachmentUrl(att.filename));
+  }
+
+  /** Download all attachments of a message into destDir (default: cwd) */
+  async downloadAttachments(
+    message: Message,
+    destDir = "."
+  ): Promise<string[]> {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(destDir, { recursive: true });
+
+    const saved: string[] = [];
+    for (const att of message.attachments) {
+      const name = att.filename.split("/").pop() ?? "attachment";
+      const buffer = await this.getAttachment(att.filename);
+      await writeFile(`${destDir}/${name}`, buffer);
+      saved.push(name);
+    }
+    return saved;
   }
 
   // ── WebSocket ──

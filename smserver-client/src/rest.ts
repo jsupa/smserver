@@ -61,6 +61,23 @@ export class RESTClient {
     return data.texts;
   }
 
+  /**
+   * Mark a chat as seen/read and return its latest messages.
+   * Mirrors the original HTML server's window-focus handler
+   * (`/requests?messages=<chat>&num_messages=1`) but sends
+   * read_messages=true so the server persists the read state.
+   */
+  async seenMessages(chatId: string, numMessages = 1): Promise<Message[]> {
+    const params: Record<string, string> = {
+      messages: chatId,
+      num_messages: String(numMessages),
+      read_messages: "true",
+    };
+    // Response shape: {texts: [...]}
+    const data = await this.getJSON<{ texts: Message[] }>("/requests", params);
+    return data.texts;
+  }
+
   // ── Chats ──
 
   async getChats(opts: ChatOptions = {}): Promise<Chat[]> {

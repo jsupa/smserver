@@ -1,6 +1,6 @@
 {
   "name": "smserver-client",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "TypeScript client for SMServer — iMessage gateway API",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -33,7 +33,13 @@
     "example:basic": "tsx examples/basic.ts",
     "example:realtime": "tsx examples/realtime.ts",
     "example:start": "tsx examples/start-chat.ts",
-    "example:images": "tsx examples/images.ts"
+    "example:images": "tsx examples/images.ts",
+    "example:seen": "tsx examples/seen-and-images.ts",
+    "example:history": "tsx examples/read-history.ts",
+    "example:send-media": "tsx examples/send-media.ts",
+    "example:groups": "tsx examples/groups.ts",
+    "example:search": "tsx examples/search.ts",
+    "example:tapbacks": "tsx examples/tapbacks.ts"
   },
   "keywords": [
     "smserver",
@@ -55,13 +61,13 @@
     "url": "https://github.com/jsupa/smserver/issues"
   },
   "dependencies": {
-    "got": "^14.4.0",
-    "ws": "^8.18.0"
+    "got": "^14.6.6",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.0",
-    "tsdown": "^0.15.0",
-    "tsx": "^4.23.1",
-    "typescript": "^5.7.0"
+    "@types/ws": "^8.18.1",
+    "tsdown": "^0.15.12",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
   }
 }

@@ -118,6 +118,7 @@ All methods return Promises.
 |--------|-------------|
 | `authenticate(password)` | Authenticate with server password |
 | `getMessages(chatId, opts?)` | Get messages for a chat |
+| `seenMessages(chatId, numMessages?)` | Mark a chat as seen/read, return latest messages |
 | `getChats(opts?)` | List recent conversations |
 | `getConversation(chatId)` | Get conversation details |
 | `getName(chatId)` | Resolve display name for a chat ID |
@@ -132,6 +133,11 @@ All methods return Promises.
 | `getAttachment(path)` | Download attachment file as Buffer |
 | `getProfilePicture(chatId)` | Download profile picture as Buffer |
 | `getPhotoFile(path)` | Download camera roll photo as Buffer |
+| `getAttachmentUrl(path)` | Full URL for an attachment file |
+| `getProfilePictureUrl(chatId)` | Full URL for a profile picture |
+| `getPhotoUrl(path)` | Full URL for a camera roll photo |
+| `getImageUrls(message)` | URLs of all image attachments on a message |
+| `downloadAttachments(message, destDir?)` | Save all message attachments to disk |
 
 ### WebSocket Events
 
@@ -153,6 +159,23 @@ client.on("error",            (err: Error) => {})
 | `connect()` | Open WebSocket connection |
 | `disconnect()` | Close WebSocket connection |
 | `sendTyping(chat, active)` | Send typing indicator |
+
+## Examples
+
+Runnable scripts in [`examples/`](examples/) (all require a running SMServer on `localhost:8085`):
+
+| Command | Shows |
+|---------|-------|
+| `npm run example:basic` | Send a message, read replies |
+| `npm run example:seen` | Mark a chat seen, view/download image attachments |
+| `npm run example:history` | Paginated history, date conversion, unread detection |
+| `npm run example:send-media` | Send messages with file attachments |
+| `npm run example:groups` | Group chats, members, profile pictures |
+| `npm run example:search` | Full-text search and contact matching |
+| `npm run example:tapbacks` | Send/remove reactions, listen for tapbacks |
+| `npm run example:realtime` | WebSocket events (typing, battery, read receipts) |
+| `npm run example:images` | Receive image messages, download attachments |
+| `npm run example:start` | Start a new conversation |
 
 ## Build
 
