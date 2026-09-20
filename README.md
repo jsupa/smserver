@@ -1,6 +1,6 @@
-# SMServer12 — iOS 12 SMS Gateway
+# SMServer12 — iOS 12 & iOS 16 SMS Gateway
 
-Run SMServer on a jailbroken iPhone 6 (iOS 12.5.8) as a persistent background service, accessible from your Mac over USB.
+Run SMServer on a jailbroken iPhone 6 (iOS 12.5.8) or iPhone 8 (iOS 16.7.16 Rootless) as a persistent background service, accessible from your Mac over USB.
 
 ## Quick Start
 
@@ -12,14 +12,15 @@ Then open **http://localhost:8085/** (default password: `toor`)
 
 ## What This Repo Contains
 
-| File | Purpose |
-|------|---------|
+| File / Folder | Purpose |
+|---------------|---------|
 | `setup-sms-phone.sh` | One-shot script — SSH tunnel, launch SMServer daemon, HTTP+WS tunnels, validation |
-| `INSTALL.md` | How to install SMServer12 from `.deb` on iOS 12 |
+| `INSTALL.md` | Installation guide for both **iOS 16 (Rootless)** and **iOS 12 (Rootful)** |
+| `packages-ios16-rootless/` | Pre-built rootless `.deb` packages for iOS 16 (`libmryipc`, `libsmserver`, `SMServer12_rootless`) |
 | `CLI.md` | Full CLI flag reference for SMServer12 |
 | `TUNNELING.md` | Port forwarding guide — `iproxy`, USB, WiFi, SSH tunnels |
 | `DEVICE-INFO.md` | How to get device info (UDID, iOS version, model, etc.) |
-| `DEBUG.md` | Debug journey — all the crashes and how they were solved |
+| `DEBUG.md` | Debug journey — all crashes (iOS 12 & iOS 16) and how they were solved |
 | `SMServer12.deb` | Pre-built CLI-only `.deb` for iOS 12 |
 
 ## Architecture

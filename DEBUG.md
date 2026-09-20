@@ -90,3 +90,44 @@ iproxy 8080 8080
 | `/Applications/SMServer12.app/identity.pfx` | TLS identity (must exist) |
 | `/Applications/SMServer12.app/smserver_cert_pass.txt` | Cert password (must exist) |
 | `/Applications/SMServer.app/` | Postinst puts certs here (wrong) |
+
+---
+
+# Debug Journey — SMServer on iOS 16.7.16 (Rootless / palera1n)
+
+Device: iPhone 8 (`iPhone10,4`), iOS 16.7.16, palera1n rootless, ElleKit.
+
+## Problem 1: Read-Only Filesystem on iOS 16
+Installing `SMServer12.deb` directly failed:
+```
+dpkg: error: cannot write to /Applications: Read-only file system
+```
+**Root cause:** iOS 16 uses Sealed System Volume (SSV). `/Applications/` is strictly read-only.
+**Solution:** Repackaged app into `/var/jb/Applications/SMServer12.app/`.
+
+## Problem 2: Hardcoded dylib Path (`libmryipc.dylib`)
+On launch, dyld immediately crashed:
+```
+dyld: Library not loaded: /usr/lib/libmryipc.dylib
+  Reason: tried: '/usr/lib/libmryipc.dylib' (no such file)
+```
+**Root cause:** The binary expected `/usr/lib/libmryipc.dylib` (rootful path). On rootless, libraries reside in `/var/jb/usr/lib/`.
+**Solution:** 
+1. Patched binary using `install_name_tool -change /usr/lib/libmryipc.dylib @rpath/libmryipc.dylib SMServer12`.
+2. Packaged `com.muirey03.libmryipc` deb installing into `/var/jb/usr/lib/libmryipc.dylib`.
+
+## Problem 3: MRYIPC Crash on API Calls (`Unknown service name`)
+When requesting `/requests?chats` or marking messages as read:
+```
+*** Terminating app due to uncaught exception 'MRYIPCException',
+reason: 'callExternalMethod:withArguments:completion: - Failed to lookup service port: Unknown service name'
+libc++abi: terminating due to uncaught exception of type NSException
+```
+**Root cause:** SMServer queries SpringBoard for pinned chats and conversation actions via MRYIPC (`com.ianwelker.smserver`). This requires the `libsmserver.dylib` tweak injected into SpringBoard.
+**Solution:** Compiled `com.janshai.libsmserver` for `arm64` rootless using Theos targeting iOS 16.0+ and installed it into `/var/jb/usr/lib/TweakInject/`.
+
+## Problem 4: ElleKit Safe Mode Blocking Tweak Injection
+Even after installing `libsmserver.deb`, SpringBoard did not load the tweak.
+**Root cause:** `/var/mobile/.eksafemode` was present, causing ElleKit to load `MobileSafety.dylib` and disable all SpringBoard tweaks.
+**Solution:** Removed `/var/mobile/.eksafemode` and respprung SpringBoard (`killall -9 SpringBoard`). `lsof` confirmed `libsmserver.dylib` loaded into `SpringBoard` and `MobileSMS`.
+
