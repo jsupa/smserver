@@ -129,5 +129,27 @@ libc++abi: terminating due to uncaught exception of type NSException
 ## Problem 4: ElleKit Safe Mode Blocking Tweak Injection
 Even after installing `libsmserver.deb`, SpringBoard did not load the tweak.
 **Root cause:** `/var/mobile/.eksafemode` was present, causing ElleKit to load `MobileSafety.dylib` and disable all SpringBoard tweaks.
-**Solution:** Removed `/var/mobile/.eksafemode` and respprung SpringBoard (`killall -9 SpringBoard`). `lsof` confirmed `libsmserver.dylib` loaded into `SpringBoard` and `MobileSMS`.
+**Solution:** Removed `/var/mobile/.eksafemode` and respang SpringBoard (`killall -9 SpringBoard`). `lsof` confirmed `libsmserver.dylib` loaded into `SpringBoard` and `MobileSMS`.
+
+## Problem 5: Safe Mode Crash on Message Sending (`NSTask` calling `/bin/sh`)
+When a message was sent via `POST /send`, the phone immediately crashed SpringBoard into ElleKit Safe Mode (`/var/mobile/.eksafemode`).
+**Crash Report:** `/var/mobile/Library/Logs/CrashReporter/SpringBoard-*.ips`
+```
+Exception Type: EXC_CRASH (SIGABRT)
+Application Specific Information:
+abort() called
+terminating with uncaught exception of type NSException
+-[NSConcreteTask launchWithDictionary:error:]: launch path /bin/sh does not exist
+```
+**Root cause:** When `POST /send` fired, IMCore triggered `__kIMChatItemsDidChangeNotification`. SpringBoard's observer in `libsmserver` (`itemsChanged:`) called `-[SMServerIPC checkIfRunning:@"SMServer"]`. That method used `NSTask` to run `/bin/sh -c "ps aux | grep SMServer"`. On iOS 16 rootless, `/bin/sh` does NOT exist (it is at `/var/jb/bin/sh`), causing an uncaught exception in SpringBoard's main runloop that killed SpringBoard.
+**Solution:** Replaced `NSTask` invocation in `libsmserver/Tweak.xm` with native BSD `sysctl(CTL_KERN, KERN_PROC, KERN_PROC_ALL)` process enumeration in memory. Wrapped notification handlers and IPC methods in `@try / @catch` blocks.
+
+## Problem 6: IMCore Chat Capabilities on iOS 16 (`processCapabilities`)
+Even after fixing the crash, messages did not send and logs showed:
+```
+SpringBoard(IMCore): Attempting a chat cache lookup without chats capability, returning early with 0 cache results only
+```
+**Root cause:** On iOS 16, `imagent` permission checking migrated from `- (unsigned)_capabilities` to `- (unsigned long long)processCapabilities`. Because `libsmserver` only hooked `_capabilities`, SpringBoard was denied full IMCore chat permissions.
+**Solution:** In `libsmserver/Tweak.xm`, hooked `- (unsigned long long)processCapabilities` on `IMDaemonController` to return `4485895ULL` for SpringBoard, MobileSMS, and SMServer. Also updated `sendText:` to properly select connected accounts and target IMChat. Rebuilt and redeployed `com.janshai.libsmserver_0.9.1_iphoneos-arm64.deb`.
+
 
